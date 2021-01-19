@@ -154,8 +154,9 @@ using udata_t = uintptr_t;
 class state
 {
 public:
-    explicit state(size_t num_iterations, udata_t user_data = 0)
+    explicit state(size_t num_iterations, udata_t user_data = 0, udata_t arg = 0)
         : _user_data(user_data)
+        , _arg(arg)
         , _iterations(num_iterations)
     {
         I_PICOBENCH_ASSERT(_iterations > 0);
@@ -167,6 +168,7 @@ public:
     void add_custom_duration(int64_t duration_ns) { _duration_ns += duration_ns; }
 
     udata_t user_data() const { return _user_data; }
+    udata_t arg() const { return _arg; }
 
     // optionally set result of benchmark
     // this can be used as a value sync to prevent optimizations
@@ -250,6 +252,7 @@ private:
     high_res_clock::time_point _start;
     int64_t _duration_ns = 0;
     udata_t _user_data;
+    udata_t _arg;
     size_t _iterations;
     result_t _result = 0;
 };
@@ -290,6 +293,7 @@ public:
     benchmark& label(const char* label) { _name = label; return *this; }
     benchmark& baseline(bool b = true) { _baseline = b; return *this; }
     benchmark& user_data(udata_t data) { _user_data = data; return *this; }
+    benchmark& args(std::vector<udata_t> data) { _args = std::move(data); return *this; }
 
 protected:
     friend class runner;
@@ -302,6 +306,7 @@ protected:
 
     udata_t _user_data = 0;
     std::vector<size_t> _state_iterations;
+    std::vector<udata_t> _args;
     int _samples = 0;
 };
 
@@ -377,6 +382,8 @@ public:
     struct benchmark_problem_space
     {
         size_t dimension; // number of iterations for the problem space
+        udata_t user_data;
+        udata_t arg;
         int samples; // number of samples taken
         int64_t total_time_ns; // fastest sample!!!
         result_t result; // result of fastest sample
@@ -470,10 +477,10 @@ public:
                     }
 
                     out << " |"
-                        << setw(8) << ps.first << " |"
+                        << setw(8) << ps.first.first << " |"
                         << setw(10) << fixed << setprecision(3) << double(bm.total_time_ns) / 1000000.0 << " |";
 
-                    auto ns_op = (bm.total_time_ns / ps.first);
+                    auto ns_op = (bm.total_time_ns / ps.first.first);
                     if (ns_op > 99999999)
                     {
                         int e = 0;
@@ -506,7 +513,7 @@ public:
                         out << "    ??? |";
                     }
 
-                    auto ops_per_sec = ps.first * (1000000000.0 / double(bm.total_time_ns));
+                    auto ops_per_sec = ps.first.first * (1000000000.0 / double(bm.total_time_ns));
                     out << setw(11) << fixed << setprecision(1) << ops_per_sec << "\n";
                 }
             }
@@ -653,19 +660,22 @@ public:
     {
         const char* name;
         bool is_baseline;
+        udata_t user_data;
+        udata_t arg;        
         int64_t total_time_ns; // fastest sample!!!
         result_t result; // result of fastest sample
     };
-
-    static std::map<size_t, std::vector<problem_space_benchmark>> get_problem_space_view(const suite& s)
+    using problem_space_view_map = std::map<std::pair<size_t, udata_t>,
+                                            std::vector<problem_space_benchmark>>;
+    static problem_space_view_map get_problem_space_view(const suite& s)
     {
-        std::map<size_t, std::vector<problem_space_benchmark>> res;
+        problem_space_view_map res;
         for (auto& bm : s.benchmarks)
         {
             for (auto& d : bm.data)
             {
-                auto& pvbs = res[d.dimension];
-                pvbs.push_back({ bm.name, bm.is_baseline, d.total_time_ns, d.result });
+                auto& pvbs = res[{d.dimension, d.arg}];
+                pvbs.push_back({ bm.name, bm.is_baseline, d.user_data, d.arg, d.total_time_ns, d.result });
             }
         }
         return res;
@@ -895,24 +905,25 @@ public:
         // initialize benchmarks
         for (auto b : benchmarks)
         {
-            const std::vector<size_t>& state_iterations =
-                b->_state_iterations.empty() ?
-                _default_state_iterations :
-                b->_state_iterations;
+            if (b->_state_iterations.empty())
+                b->_state_iterations = _default_state_iterations;
+
+            udata_t arg = b->_args.empty() ? udata_t() : b->_args.back();
+            b->_args.resize(b->_state_iterations.size(), arg);
 
             if (b->_samples == 0)
                 b->_samples = _default_samples;
 
-            b->_states.reserve(state_iterations.size() * size_t(b->_samples));
+            b->_states.reserve(b->_state_iterations.size() * b->_samples);
 
             // fill states while random shuffling them
-            for (auto iters : state_iterations)
+            for (size_t iter = 0; iter < b->_state_iterations.size(); ++iter)
             {
                 for (int i = 0; i < b->_samples; ++i)
                 {
                     auto index = rnd() % (b->_states.size() + 1);
                     auto pos = b->_states.begin() + long(index);
-                    b->_states.emplace(pos, iters, b->_user_data);
+                    b->_states.emplace(pos, b->_state_iterations[iter], b->_user_data, b->_args[iter]);
                 }
             }
 
@@ -948,7 +959,8 @@ public:
         {
             auto i = benchmarks.begin() + long(rnd() % benchmarks.size());
             auto& b = *i;
-
+            std::cerr << "run: " << b->_name << ": " << b->_istate->iterations()
+                                             << " (" << b->_istate->arg() << ")\n";
             b->_proc(*b->_istate);
 
             ++b->_istate;
@@ -982,22 +994,17 @@ public:
                 rpt_benchmark->name = b->_name;
                 rpt_benchmark->is_baseline = b->_baseline;
 
-                const std::vector<size_t>& state_iterations =
-                    b->_state_iterations.empty() ?
-                    _default_state_iterations :
-                    b->_state_iterations;
-
-                rpt_benchmark->data.reserve(state_iterations.size());
-                for (auto d : state_iterations)
+                rpt_benchmark->data.reserve(b->_state_iterations.size());
+                for (size_t i = 0; i < b->_state_iterations.size(); ++i)
                 {
-                    rpt_benchmark->data.push_back({ d, 0, 0ll });
+                    rpt_benchmark->data.push_back({ b->_state_iterations[i], b->_user_data, b->_args[i], 0, 0ll });
                 }
 
                 for (auto& state : b->_states)
                 {
                     for (auto& d : rpt_benchmark->data)
                     {
-                        if (state.iterations() == d.dimension)
+                        if (state.iterations() == d.dimension && state.arg() == d.arg)
                         {
                             if (d.total_time_ns == 0 || d.total_time_ns > state.duration_ns())
                             {
@@ -1046,7 +1053,7 @@ public:
                     if (space.second.size() == 1)
                     {
                         auto& b = space.second.front();
-                        *_stdwarn << "Warning: Benchmark " << b.name << " @" << space.first
+                        *_stdwarn << "Warning: Benchmark " << b.name << " @" << space.first.first
                                   << " has a single instance and cannot be compared to others.\n";
                         continue;
                     }
@@ -1059,7 +1066,7 @@ public:
                         {
                             auto& f = space.second.front();
                             *_stderr << "Error: Benchmarks " << f.name << " and " << b.name
-                                     << " @" << space.first << " produce different results: "
+                                     << " @" << space.first.first << " produce different results: "
                                      << result0 << " and " << b.result << '\n';
                             _error = error_benchmark_compare;
                         }
