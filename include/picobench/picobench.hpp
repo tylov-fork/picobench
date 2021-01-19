@@ -149,23 +149,24 @@ using high_res_clock = std::chrono::high_resolution_clock;
 #endif
 
 using result_t = intptr_t;
+using udata_t = uintptr_t;
 
 class state
 {
 public:
-    explicit state(int num_iterations, uintptr_t user_data = 0)
+    explicit state(size_t num_iterations, udata_t user_data = 0)
         : _user_data(user_data)
         , _iterations(num_iterations)
     {
         I_PICOBENCH_ASSERT(_iterations > 0);
     }
 
-    int iterations() const { return _iterations; }
+    size_t iterations() const { return _iterations; }
 
     int64_t duration_ns() const { return _duration_ns; }
     void add_custom_duration(int64_t duration_ns) { _duration_ns += duration_ns; }
 
-    uintptr_t user_data() const { return _user_data; }
+    udata_t user_data() const { return _user_data; }
 
     // optionally set result of benchmark
     // this can be used as a value sync to prevent optimizations
@@ -221,14 +222,14 @@ public:
         }
 
         PICOBENCH_INLINE
-        int operator*() const
+        size_t operator*() const
         {
             return _counter;
         }
 
     private:
-        int _counter;
-        const int _lim;
+        size_t _counter;
+        const size_t _lim;
         state* _state;
     };
 
@@ -248,8 +249,8 @@ public:
 private:
     high_res_clock::time_point _start;
     int64_t _duration_ns = 0;
-    uintptr_t _user_data;
-    int _iterations;
+    udata_t _user_data;
+    size_t _iterations;
     result_t _result = 0;
 };
 
@@ -284,11 +285,11 @@ class benchmark
 public:
     const char* name() const { return _name; }
 
-    benchmark& iterations(std::vector<int> data) { _state_iterations = std::move(data); return *this; }
+    benchmark& iterations(std::vector<size_t> data) { _state_iterations = std::move(data); return *this; }
     benchmark& samples(int n) { _samples = n; return *this; }
     benchmark& label(const char* label) { _name = label; return *this; }
     benchmark& baseline(bool b = true) { _baseline = b; return *this; }
-    benchmark& user_data(uintptr_t data) { _user_data = data; return *this; }
+    benchmark& user_data(udata_t data) { _user_data = data; return *this; }
 
 protected:
     friend class runner;
@@ -299,8 +300,8 @@ protected:
     const benchmark_proc _proc;
     bool _baseline = false;
 
-    uintptr_t _user_data = 0;
-    std::vector<int> _state_iterations;
+    udata_t _user_data = 0;
+    std::vector<size_t> _state_iterations;
     int _samples = 0;
 };
 
@@ -375,7 +376,7 @@ class report
 public:
     struct benchmark_problem_space
     {
-        int dimension; // number of iterations for the problem space
+        size_t dimension; // number of iterations for the problem space
         int samples; // number of samples taken
         int64_t total_time_ns; // fastest sample!!!
         result_t result; // result of fastest sample
@@ -541,7 +542,7 @@ public:
             }
             I_PICOBENCH_ASSERT(baseline);
             int64_t baseline_total_time = 0;
-            int baseline_total_iterations = 0;
+            size_t baseline_total_iterations = 0;
             for (auto& d : baseline->data)
             {
                 baseline_total_time += d.total_time_ns;
@@ -561,7 +562,7 @@ public:
                 }
 
                 int64_t total_time = 0;
-                int total_iterations = 0;
+                size_t total_iterations = 0;
                 for (auto& d : bm.data)
                 {
                     total_time += d.total_time_ns;
@@ -656,9 +657,9 @@ public:
         result_t result; // result of fastest sample
     };
 
-    static std::map<int, std::vector<problem_space_benchmark>> get_problem_space_view(const suite& s)
+    static std::map<size_t, std::vector<problem_space_benchmark>> get_problem_space_view(const suite& s)
     {
-        std::map<int, std::vector<problem_space_benchmark>> res;
+        std::map<size_t, std::vector<problem_space_benchmark>> res;
         for (auto& bm : s.benchmarks)
         {
             for (auto& d : bm.data)
@@ -894,7 +895,7 @@ public:
         // initialize benchmarks
         for (auto b : benchmarks)
         {
-            const std::vector<int>& state_iterations =
+            const std::vector<size_t>& state_iterations =
                 b->_state_iterations.empty() ?
                 _default_state_iterations :
                 b->_state_iterations;
@@ -981,7 +982,7 @@ public:
                 rpt_benchmark->name = b->_name;
                 rpt_benchmark->is_baseline = b->_baseline;
 
-                const std::vector<int>& state_iterations =
+                const std::vector<size_t>& state_iterations =
                     b->_state_iterations.empty() ?
                     _default_state_iterations :
                     b->_state_iterations;
@@ -1070,12 +1071,12 @@ public:
         return rpt;
     }
 
-    void set_default_state_iterations(const std::vector<int>& data)
+    void set_default_state_iterations(const std::vector<size_t>& data)
     {
         _default_state_iterations = data;
     }
 
-    const std::vector<int>& default_state_iterations() const
+    const std::vector<size_t>& default_state_iterations() const
     {
         return _default_state_iterations;
     }
@@ -1090,7 +1091,7 @@ public:
         return _default_samples;
     }
 
-    void add_cmd_opt(const char* cmd, const char* arg_desc, const char* cmd_desc, bool(*handler)(uintptr_t, const char*), uintptr_t user_data = 0)
+    void add_cmd_opt(const char* cmd, const char* arg_desc, const char* cmd_desc, bool(*handler)(uintptr_t, const char*), udata_t user_data = 0)
     {
         cmd_line_option opt;
         opt.cmd = picostring(cmd);
@@ -1228,7 +1229,7 @@ private:
     // default data
 
     // default iterations per state per benchmark
-    std::vector<int> _default_state_iterations;
+    std::vector<size_t> _default_state_iterations;
 
     // default samples per benchmark
     int _default_samples;
@@ -1236,7 +1237,7 @@ private:
     // command line parsing
     picostring _cmd_prefix;
     typedef bool (runner::*cmd_handler)(const char*); // internal handler
-    typedef bool(*ext_handler)(uintptr_t user_data, const char* cmd_line); // external (user) handler
+    typedef bool(*ext_handler)(udata_t user_data, const char* cmd_line); // external (user) handler
     struct cmd_line_option
     {
         cmd_line_option() = default;
@@ -1252,7 +1253,7 @@ private:
         picostring arg_desc;
         const char* desc;
         cmd_handler handler; // may be nullptr for external handlers
-        uintptr_t user_data; // passed as an argument to user handlers
+        udata_t user_data; // passed as an argument to user handlers
         ext_handler user_handler;
     };
     bool _has_opts = false; // have opts been added to list
@@ -1260,11 +1261,11 @@ private:
 
     bool cmd_iters(const char* line)
     {
-        std::vector<int> iters;
+        std::vector<size_t> iters;
         auto p = line;
         while (true)
         {
-            auto i = int(strtoul(p, nullptr, 10));
+            auto i = strtoull(p, nullptr, 10);
             if (i <= 0) return false;
             iters.push_back(i);
             p = strchr(p + 1, ',');
