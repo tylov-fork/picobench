@@ -440,17 +440,17 @@ public:
     void to_text(std::ostream& out) const
     {
         using namespace std;
+        int width = 100;
         for (auto& suite : suites)
         {
             if (suite.name)
             {
                 out << suite.name << ":\n";
             }
-
-            line(out);
+            line(out, width);
             out <<
-                "   Name (baseline is *)   |   Dim   |  Total ms |  ns/op  |Baseline| Ops/second\n";
-            line(out);
+                "  Name (* = baseline)        |Iterations |       Arg |Baseline |     ns/op |  Total ms |  Ops/second\n";
+            line(out, width);
 
             auto problem_space_view = get_problem_space_view(suite);
             for (auto& ps : problem_space_view)
@@ -467,18 +467,26 @@ public:
 
                 for (auto& bm : ps.second)
                 {
-                    if (bm.is_baseline)
+                    out << (bm.is_baseline ? "* " : "  ") << left << setw(26) << bm.name << right;
+
+                    out << " |"
+                        << setw(10) << ps.first.first << " |"
+                        << setw(10) << bm.arg << " |";
+
+                    if (baseline == &bm)
                     {
-                        out << setw(23) << bm.name << " *";
+                        out << "       - |";
+                    }
+                    else if (baseline)
+                    {
+                        out << setw(8) << fixed << setprecision(3)
+                            << double(bm.total_time_ns) / double(baseline->total_time_ns) << " |";
                     }
                     else
                     {
-                        out << setw(25) << bm.name;
-                    }
-
-                    out << " |"
-                        << setw(8) << ps.first.first << " |"
-                        << setw(10) << fixed << setprecision(3) << double(bm.total_time_ns) / 1000000.0 << " |";
+                        // no baseline to compare to
+                        out << "       ? |";
+                    }                        
 
                     auto ns_op = (bm.total_time_ns / ps.first.first);
                     if (ns_op > 99999999)
@@ -489,41 +497,27 @@ public:
                             ++e;
                             ns_op /= 10;
                         }
-                        out << ns_op << 'e' << e;
+                        out << setw(8) << ns_op << 'e' << e;
                     }
                     else
                     {
-                        out << setw(8) << ns_op;
+                        out << setw(10) << ns_op;
                     }
-
                     out << " |";
-
-                    if (baseline == &bm)
-                    {
-                        out << "      - |";
-                    }
-                    else if (baseline)
-                    {
-                        out << setw(7) << fixed << setprecision(3)
-                            << double(bm.total_time_ns) / double(baseline->total_time_ns) << " |";
-                    }
-                    else
-                    {
-                        // no baseline to compare to
-                        out << "    ??? |";
-                    }
+                    out << setw(10) << fixed << setprecision(2) << double(bm.total_time_ns) / 1000000.0 << " |";
 
                     auto ops_per_sec = ps.first.first * (1000000000.0 / double(bm.total_time_ns));
-                    out << setw(11) << fixed << setprecision(1) << ops_per_sec << "\n";
+                    out << setw(12) << fixed << setprecision(1) << ops_per_sec << "\n";
                 }
             }
-            line(out);
+            line(out, width);
         }
     }
 
     void to_text_concise(std::ostream& out)
     {
         using namespace std;
+        int width = 65;
         for (auto& suite : suites)
         {
             if (suite.name)
@@ -531,12 +525,12 @@ public:
                 out << suite.name << ":\n";
             }
 
-            line(out);
+            line(out, width);
 
             out <<
-                "   Name (baseline is *)   |  ns/op  | Baseline |  Ops/second\n";
+                "  Name (* = baseline)        | Baseline |     ns/op |  Ops/second\n";
 
-            line(out);
+            line(out, width);
 
             const benchmark* baseline = nullptr;
             for (auto& bm : suite.benchmarks)
@@ -548,113 +542,108 @@ public:
                 }
             }
             I_PICOBENCH_ASSERT(baseline);
-            int64_t baseline_total_time = 0;
+            uint64_t baseline_total_time = 0;
             size_t baseline_total_iterations = 0;
             for (auto& d : baseline->data)
             {
                 baseline_total_time += d.total_time_ns;
                 baseline_total_iterations += d.dimension;
             }
-            int64_t baseline_ns_per_op = baseline_total_time / baseline_total_iterations;
+            uint64_t baseline_ns_per_op = baseline_total_time / baseline_total_iterations;
 
             for (auto& bm : suite.benchmarks)
             {
-                if (bm.is_baseline)
-                {
-                    out << setw(23) << bm.name << " *";
-                }
-                else
-                {
-                    out << setw(25) << bm.name;
-                }
+                out << (bm.is_baseline ? "* " : "  ") << left << setw(26) << bm.name << right
+                    << " |";
 
-                int64_t total_time = 0;
+                uint64_t total_time = 0;
                 size_t total_iterations = 0;
                 for (auto& d : bm.data)
                 {
                     total_time += d.total_time_ns;
                     total_iterations += d.dimension;
                 }
-                int64_t ns_per_op = total_time / total_iterations;
+                uint64_t ns_per_op = total_time / total_iterations;
 
-                out << " |" << setw(8) << ns_per_op << " |";
-
-                if (&bm == baseline)
+                if (bm.is_baseline)
                 {
-                    out << "        - |";
+                    out << "        -";
+                    baseline_total_time = total_time;
+                    baseline_total_iterations = total_iterations;
+                    baseline_ns_per_op = ns_per_op;
                 }
                 else
                 {
                     out << setw(9) << fixed << setprecision(3)
-                        << double(ns_per_op) / double(baseline_ns_per_op) << " |";
+                        << double(ns_per_op) / baseline_ns_per_op;
                 }
 
-                auto ops_per_sec = total_iterations * (1000000000.0 / double(total_time));
+                out << " |" << setw(10) << ns_per_op << " |";
+
+                auto ops_per_sec = total_iterations * (1000000000.0 / total_time);
                 out << setw(12) << fixed << setprecision(1) << ops_per_sec << "\n";
             }
 
-            line(out);
+            line(out, width);
         }
     }
 
-    void to_csv(std::ostream& out, bool header = true) const
+    void to_csv(std::ostream& out) const
     {
         using namespace std;
-
-        if (header)
-        {
-            out << "Suite,Benchmark,b,D,S,\"Total ns\",Result,\"ns/op\",Baseline\n";
-        }
+        const char* sep = ",";
 
         for (auto& suite : suites)
         {
-            const benchmark* baseline = nullptr;
-            for (auto& bm : suite.benchmarks)
+            out << "Suite, Baseline, Benchmark, Iterations, Arg, Ratio, Total ms, ns/op, Ops/second\n";
+
+            auto problem_space_view = get_problem_space_view(suite);
+            for (auto& ps : problem_space_view)
             {
-                if (bm.is_baseline)
+                const problem_space_benchmark* baseline = nullptr;
+                for (auto& bm : ps.second)
                 {
-                    baseline = &bm;
-                    break;
+                    if (bm.is_baseline)
+                    {
+                        baseline = &bm;
+                        break;
+                    }
                 }
-            }
-            I_PICOBENCH_ASSERT(baseline);
 
-            for (auto& bm : suite.benchmarks)
-            {
-                for (auto& d : bm.data)
+                for (auto& bm : ps.second)
                 {
-                    if (suite.name)
-                    {
-                        out << '"' << suite.name << '"';;
-                    }
-                    out << ",\"" << bm.name << "\",";
-                    if (&bm == baseline)
-                    {
-                        out << '*';
-                    }
-                    out << ','
-                        << d.dimension << ','
-                        << d.samples << ','
-                        << d.total_time_ns << ','
-                        << d.result << ','
-                        << (d.total_time_ns / d.dimension) << ',';
+                    out << '"' << (suite.name ? suite.name : "") << '"';
+                    out << sep << (bm.is_baseline ? "true" : "false");
+                    out << sep << '"' << bm.name << '"';
+                    out << sep << ps.first.first
+                        << sep << bm.arg << sep;
 
-                    if (baseline)
+                    if (baseline == &bm)
                     {
-                        for (auto& bd : baseline->data)
-                        {
-                            if (bd.dimension == d.dimension)
-                            {
-                                out << fixed << setprecision(3) << (double(d.total_time_ns) / double(bd.total_time_ns));
-                            }
-                        }
+                        out << 1.0;
                     }
+                    else if (baseline)
+                    {
+                        out << fixed << setprecision(3) << double(bm.total_time_ns) / baseline->total_time_ns;
+                    }
+                    else
+                    {
+                        out << -1.0; // no baseline to compare to
+                    }
+                    
+                    out << sep << fixed << setprecision(3) << bm.total_time_ns / 1000000.0;
 
-                    out << '\n';
+                    auto ns_op = (bm.total_time_ns / ps.first.first);
+                    out << sep << ns_op;
+
+                    auto ops_per_sec = ps.first.first * (1000000000.0 / bm.total_time_ns);
+                    out << sep << fixed << setprecision(1) << ops_per_sec << "\n";
                 }
             }
         }
     }
+
+
 
     struct problem_space_benchmark
     {
@@ -683,9 +672,9 @@ public:
 
 private:
 
-    static void line(std::ostream& out)
+    static void line(std::ostream& out, int width = 79)
     {
-        for (int i = 0; i < 79; ++i) out.put('=');
+        for (int i = 0; i < width; ++i) out.put('=');
         out.put('\n');
     }
 };
@@ -959,8 +948,9 @@ public:
         {
             auto i = benchmarks.begin() + long(rnd() % benchmarks.size());
             auto& b = *i;
-            std::cerr << "run: " << b->_name << ": " << b->_istate->iterations()
-                                             << " (" << b->_istate->arg() << ")\n";
+            //std::cerr << "run: " << b->_name << ": " << b->_istate->iterations()
+            //                                 << " (" << b->_istate->arg() << ")\n";
+            std::cerr << '.';
             b->_proc(*b->_istate);
 
             ++b->_istate;
@@ -970,6 +960,7 @@ public:
                 benchmarks.erase(i);
             }
         }
+        std::cerr << '\n';
     }
 
     // function to compare results

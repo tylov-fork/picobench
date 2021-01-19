@@ -14,7 +14,7 @@ void rand_vector(picobench::state& s)
         v.push_back(rand());
     }
 }
-PICOBENCH(rand_vector);
+PICOBENCH(rand_vector).args({1, 2, 3, 4, 5});
 
 void rand_vector_reserve(picobench::state& s)
 {
@@ -25,7 +25,7 @@ void rand_vector_reserve(picobench::state& s)
         v.push_back(rand());
     }
 }
-PICOBENCH(rand_vector_reserve);
+PICOBENCH(rand_vector_reserve).args({1, 2, 3, 4, 5});;
 
 void rand_deque(picobench::state& s)
 {
@@ -35,4 +35,4 @@ void rand_deque(picobench::state& s)
         v.push_back(rand());
     }
 }
-PICOBENCH(rand_deque);
+PICOBENCH(rand_deque).args({1, 2, 3, 4, 5});;
